@@ -81,17 +81,16 @@
 <body>
 
     <h2>SQL Query Builder</h2>
-    <p>Run Sql Query in browser without creating any database.</p>
+    <p>Run SQL queries in the browser without creating any database.</p>
 
     <div class="container">
         <form action="/" method="POST">
             <div class="row">
                 <div class="col-25">
-                    <label for="subject">Sql Query : </label>
+                    <label for="subject">SQL Query:</label>
                 </div>
                 <div class="col-75">
-                    <textarea id="queries" name="queries" placeholder="Example : SELECT * FROM table_name ;"
-                        style="height:200px" required></textarea>
+                    <textarea id="queries" name="queries" placeholder="Example: SELECT * FROM table_name;" style="height:200px" required></textarea>
                 </div>
             </div>
             <br>
@@ -101,29 +100,29 @@
         </form>
     </div>
 
-
-    <h2>Results : </h2>
+    <h2>Results:</h2>
 
     {{ if .Submitted }}
     {{ if .Results }}
-    
     <table border="1">
         <tr>
             {{ range .Columns }}
             <th>{{ . }}</th>
             {{ end }}
         </tr>
-        
         {{ range .Results }}
         <tr>
-            {{ range $key, $value := . }}
-            <td>{{ $value }}</td>
+            {{ range . }}
+            <td>{{ . }}</td>
             {{ end }}
         </tr>
         {{ end }}
     </table>
     {{ else }}
     <p>Query Executed Successfully...</p>
+    {{ end }}
+    {{ if .Error }}
+    <p style="color:red;">{{ .Error }}</p>
     {{ end }}
     {{ end }}
 

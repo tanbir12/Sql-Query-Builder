@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
@@ -9,15 +10,15 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
-// Structure to handle query input
 type QueryRequest struct {
 	Query     string
 	Submitted bool
 }
 
 type QueryResponse struct {
-	Results []map[string]interface{} `json:"results,omitempty"`
-	Error   string                   `json:"error,omitempty"`
+	Columns []string
+	Results [][]interface{}
+	Error   string
 }
 
 var db *sql.DB
@@ -28,6 +29,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
+	defer db.Close()
+
+	err = db.Ping()
+	if err != nil {
+		log.Fatalf("Database connection failed: %v", err)
+	}
 
 	http.HandleFunc("/", executeQuery)
 
@@ -36,19 +43,16 @@ func main() {
 }
 
 func executeQuery(w http.ResponseWriter, r *http.Request) {
-
 	data := QueryRequest{}
-	results := []map[string]interface{}{}
+	response := QueryResponse{}
 
 	if r.Method == http.MethodPost {
-		// Parse form data
 		err := r.ParseForm()
 		if err != nil {
 			http.Error(w, "Error parsing form", http.StatusBadRequest)
 			return
 		}
 
-		// Populate form data
 		data.Submitted = true
 		data.Query = r.FormValue("queries")
 	}
@@ -59,66 +63,55 @@ func executeQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var columns []string
-
 	if data.Query != "" {
-		var query = data.Query
+
 		// If the query have prefix select but no limit
 		// if !strings.Contains(strings.ToLower(data.Query), "limit") && strings.HasPrefix(strings.ToLower(data.Query), "select") {
 		// 	query = query[:len(query)-1] + " LIMIT 1 ;"
 		// }
 
-		rows, err := db.Query(query)
+		rows, err := db.Query(data.Query)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		defer rows.Close()
+			response.Error = fmt.Sprintf("Query error: %v", err)
+		} else {
+			defer rows.Close()
 
-		columns, err = rows.Columns() // Get column names
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+			response.Columns, err = rows.Columns()
+			if err != nil {
+				response.Error = fmt.Sprintf("Error retrieving columns: %v", err)
+			} else {
+				for rows.Next() {
+					record := make([]interface{}, len(response.Columns))
+					recordPtrs := make([]interface{}, len(response.Columns))
+					for i := range record {
+						recordPtrs[i] = &record[i]
+					}
 
-		for rows.Next() {
-			record := make([]interface{}, len(columns))
-			recordPtrs := make([]interface{}, len(columns))
-			for i := range record {
-				recordPtrs[i] = &record[i]
-			}
+					if err := rows.Scan(recordPtrs...); err != nil {
+						response.Error = fmt.Sprintf("Error scanning row: %v", err)
+						return
+					}
 
-			if err := rows.Scan(recordPtrs...); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
+					for i, rawValue := range record {
+						if b, ok := rawValue.([]byte); ok {
+							record[i] = string(b)
+						}
+					}
 
-			rowMap := make(map[string]interface{})
-			for i, colName := range columns {
-				rawValue := record[i]
-				if b, ok := rawValue.([]byte); ok {
-					rowMap[colName] = string(b)
-				} else {
-					rowMap[colName] = rawValue
+					response.Results = append(response.Results, record)
 				}
 			}
-
-			results = append(results, rowMap)
-
 		}
 	}
 
-	// Render the template with the query results
 	err = tmpl.Execute(w, struct {
-		Query     string
-		Columns   []string
-		Results   []map[string]interface{}
+		Query string
+		QueryResponse
 		Submitted bool
 	}{
-		Query:     data.Query,
-		Columns:   columns,
-		Results:   results,
-		Submitted: data.Submitted,
+		Query:         data.Query,
+		QueryResponse: response,
+		Submitted:     data.Submitted,
 	})
 	if err != nil {
 		http.Error(w, "Error rendering template", http.StatusInternalServerError)
